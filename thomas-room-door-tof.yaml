@@ -47,6 +47,13 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  manual_ip:
+    # Set this to the IP of the ESP
+    static_ip: !secret ip_thomas-room-door-ToF
+    # Set this to the IP address of the router. Often ends with .1
+    gateway: !secret gateway
+    # The subnet of the network. 255.255.255.0 works for most home networks.
+    subnet: !secret subnet
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
