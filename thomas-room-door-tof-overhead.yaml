@@ -15,9 +15,7 @@ esphome:
   friendly_name: ${friendly_name}
 
   on_boot:
-    # ...
     then:
-      # - number.to_min: personsInRoom
       - lambda: !lambda |-
           id(template_text).publish_state("Init Sensors");
           id(inner_door_occupancy).publish_state(false);
@@ -96,7 +94,7 @@ sensor:
     # long_range: true
     unit_of_measurement: "m"
     device_class: "distance"
-    internal: false
+    internal: true
     on_value: 
       then:
         lambda: |-
@@ -119,7 +117,7 @@ sensor:
     # long_range: true
     unit_of_measurement: "m"
     device_class: "distance"
-    internal: false
+    internal: true
     on_value: 
       then:
         lambda: |-
@@ -147,6 +145,7 @@ binary_sensor:
   - platform: template
     name: "Inner Door Occupancy"
     id: inner_door_occupancy
+    # internal: true
     device_class: "occupancy"
     on_press: 
       then:
@@ -158,6 +157,7 @@ binary_sensor:
   - platform: template
     name: "Outer Door Occupancy"
     id: outer_door_occupancy
+    # internal: true
     device_class: "occupancy"
     on_press: 
       then:
