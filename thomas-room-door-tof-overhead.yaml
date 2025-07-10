@@ -1,0 +1,295 @@
+# --------------------------------------------------------------------------
+# Substitutions
+#
+# These are substitutions as used by the configuration packages from below.
+# You can uncomment and update the ones that you want to modify.
+# --------------------------------------------------------------------------
+
+substitutions:
+  name: thomas-room-door-tof
+  friendly_name: thomas-room-door-ToF
+  device_name: thomas-room-door-ToF
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+  on_boot:
+    # ...
+    then:
+      # - number.to_min: personsInRoom
+      - lambda: !lambda |-
+          id(template_text).publish_state("Init Sensors");
+          id(inner_door_occupancy).publish_state(false);
+          id(outer_door_occupancy).publish_state(false);
+          id(await_enter).publish_state(false);
+          id(await_exit).publish_state(false);
+
+esp8266:
+  board: d1_mini
+
+# Enable logging
+logger:
+  level: DEBUG
+  logs:
+    vl53l0x: ERROR
+    sensor: ERROR
+    number: ERROR
+
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  password: !secret ota_password
+  platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  manual_ip:
+    # Set this to the IP of the ESP
+    static_ip: !secret ip_thomas-room-door-ToF
+    # Set this to the IP address of the router. Often ends with .1
+    gateway: !secret gateway
+    # The subnet of the network. 255.255.255.0 works for most home networks.
+    subnet: !secret subnet
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: ${device_name}_fallback
+    password: !secret ap_password
+
+captive_portal:
+
+i2c:
+  sda: D2
+  scl: D1
+
+number:
+  - platform: template
+    name: "Persons in Room"
+    id: personsInRoom
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: box
+    restore_value: true
+    internal: false
+    on_value: 
+      then:
+        lambda: |-
+            id(template_text).publish_state("'Persons in Room' changed to: " + (to_string(int(id(personsInRoom).state))));
+
+sensor:
+  - platform: vl53l0x
+    name: "Inner Door Distance Sensor"
+    id: distance01
+    address: 0x41
+    enable_pin: D3
+    # timeout: 10ms
+    update_interval: 33ms
+    # signal_rate_limit: 0.1
+    # long_range: true
+    unit_of_measurement: "m"
+    device_class: "distance"
+    internal: false
+    on_value: 
+      then:
+        lambda: |-
+            if(id(distance01).state > 0){
+            id(inner_door_occupancy).publish_state(true);
+            }
+            else{
+              id(inner_door_occupancy).publish_state(false);
+            }
+
+
+  - platform: vl53l0x
+    name: "Outer Door Distance Sensor"
+    id: distance02
+    address: 0x42
+    enable_pin: D5
+    # timeout: 10ms
+    update_interval: 33ms
+    # signal_rate_limit: 0.1
+    # long_range: true
+    unit_of_measurement: "m"
+    device_class: "distance"
+    internal: false
+    on_value: 
+      then:
+        lambda: |-
+            if(id(distance02).state > 0){
+            id(outer_door_occupancy).publish_state(true);
+            }
+            else{
+              id(outer_door_occupancy).publish_state(false);
+            }
+
+# Logger for HA frontend
+text_sensor:
+  - platform: template
+    id: template_text
+    name: "Logger"
+
+binary_sensor:
+  - platform: template
+    name: "Occupancy"
+    id: occupancy
+    lambda: |-
+      return id(personsInRoom).state > 0;
+    device_class: "occupancy"
+
+  - platform: template
+    name: "Inner Door Occupancy"
+    id: inner_door_occupancy
+    device_class: "occupancy"
+    on_press: 
+      then:
+        lambda: |-
+            if(id(inner_door_occupancy).state && !id(outer_door_occupancy).state){
+              id(await_exit).publish_state(true);
+            }
+
+  - platform: template
+    name: "Outer Door Occupancy"
+    id: outer_door_occupancy
+    device_class: "occupancy"
+    on_press: 
+      then:
+        lambda: |-
+            if(id(outer_door_occupancy).state && !id(inner_door_occupancy).state){
+              id(await_enter).publish_state(true);
+            }
+
+
+  - platform: template
+    name: "Await Exit"
+    id: await_exit
+    # internal: true
+    device_class: "motion"
+    on_press:
+      if:
+        condition:
+          for:
+            time: 1s
+            condition:
+              binary_sensor.is_off: await_enter
+        then:
+          - text_sensor.template.publish:
+              id: template_text
+              state: "Detected inner door occupancy. Waiting for possible exit."
+          - wait_until:
+              condition:
+                and:
+                  - binary_sensor.is_on: outer_door_occupancy
+                  - binary_sensor.is_off: inner_door_occupancy
+              timeout: 2s
+          - if:
+              condition:
+                and:
+                  - binary_sensor.is_on: outer_door_occupancy
+                  - binary_sensor.is_off: inner_door_occupancy
+              then:
+                - wait_until:
+                    condition:
+                      and:
+                        - binary_sensor.is_off: outer_door_occupancy
+                        - binary_sensor.is_off: inner_door_occupancy
+                    timeout: 2s
+                - if:
+                    condition:
+                      and:
+                        - binary_sensor.is_off: outer_door_occupancy
+                        - binary_sensor.is_off: inner_door_occupancy
+                    then:
+                      - text_sensor.template.publish:
+                          id: template_text
+                          state: "Exit detected. Resetting persons in room."
+                      - number.decrement: 
+                          id: personsInRoom
+                          cycle: false
+        
+          - text_sensor.template.publish:
+              id: template_text
+              state: "Await Exit finished. Resetting state."
+          - binary_sensor.template.publish:
+              id: await_exit
+              state: false
+        else:
+          - binary_sensor.template.publish:
+              id: await_exit
+              state: false
+
+  - platform: template
+    name: "Await Enter"
+    id: await_enter
+    # internal: true
+    device_class: "motion"
+    on_press:
+      if:
+        condition:
+          for:
+            time: 1s
+            condition:
+              binary_sensor.is_off: await_exit
+        then:
+          - text_sensor.template.publish:
+              id: template_text
+              state: "Detected outer door occupancy. Waiting for possible entry."
+          - wait_until:
+              condition:
+                and:
+                  - binary_sensor.is_on: inner_door_occupancy
+                  - binary_sensor.is_off: outer_door_occupancy
+              timeout: 2s
+          - if:
+              condition:
+                and:
+                  - binary_sensor.is_on: inner_door_occupancy
+                  - binary_sensor.is_off: outer_door_occupancy
+              then:
+                - wait_until:
+                    condition:
+                      and:
+                        - binary_sensor.is_off: inner_door_occupancy
+                        - binary_sensor.is_off: outer_door_occupancy
+                    timeout: 10s
+                - if:
+                    condition:
+                      and:
+                        - binary_sensor.is_off: inner_door_occupancy
+                        - binary_sensor.is_off: outer_door_occupancy
+                    then:
+                      - text_sensor.template.publish:
+                          id: template_text
+                          state: "Entry detected. Incrementing persons in room."
+                      - number.increment: 
+                          id: personsInRoom
+                          cycle: false
+                    else:
+                      - text_sensor.template.publish:
+                          id: template_text
+                          state: "No entry detected."
+                      - binary_sensor.template.publish:
+                          id: await_enter
+                          state: false
+              else:
+                - text_sensor.template.publish:
+                    id: template_text
+                    state: "No entry detected."
+                - binary_sensor.template.publish:
+                    id: await_enter
+                    state: false
+
+          - binary_sensor.template.publish:
+              id: await_enter
+              state: false
+        else:
+          - binary_sensor.template.publish:
+              id: await_enter
+              state: false
