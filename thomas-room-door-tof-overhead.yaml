@@ -45,8 +45,8 @@ ota:
   platform: esphome
 
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  ssid: !secret wifi_ssid_my_room
+  password: !secret wifi_password_my_room
   manual_ip:
     # Set this to the IP of the ESP
     static_ip: !secret ip_thomas-room-door-ToF
@@ -98,7 +98,7 @@ sensor:
     on_value: 
       then:
         lambda: |-
-            if(id(distance01).state > 0){
+            if(id(distance01).state > 0 && id(aqara_door_sensor).state){
             id(inner_door_occupancy).publish_state(true);
             }
             else{
@@ -121,7 +121,7 @@ sensor:
     on_value: 
       then:
         lambda: |-
-            if(id(distance02).state > 0){
+            if(id(distance02).state > 0 && id(aqara_door_sensor).state){
             id(outer_door_occupancy).publish_state(true);
             }
             else{
@@ -150,7 +150,7 @@ binary_sensor:
     on_press: 
       then:
         lambda: |-
-            if(id(inner_door_occupancy).state && !id(outer_door_occupancy).state){
+            if(id(inner_door_occupancy).state && !id(outer_door_occupancy).state && id(aqara_door_sensor).state){
               id(await_exit).publish_state(true);
             }
 
@@ -162,7 +162,7 @@ binary_sensor:
     on_press: 
       then:
         lambda: |-
-            if(id(outer_door_occupancy).state && !id(inner_door_occupancy).state){
+            if(id(outer_door_occupancy).state && !id(inner_door_occupancy).state && id(aqara_door_sensor).state){
               id(await_enter).publish_state(true);
             }
 
@@ -180,9 +180,6 @@ binary_sensor:
             condition:
               binary_sensor.is_off: await_enter
         then:
-          - text_sensor.template.publish:
-              id: template_text
-              state: "Detected inner door occupancy. Waiting for possible exit."
           - wait_until:
               condition:
                 and:
@@ -213,10 +210,7 @@ binary_sensor:
                       - number.decrement: 
                           id: personsInRoom
                           cycle: false
-        
-          - text_sensor.template.publish:
-              id: template_text
-              state: "Await Exit finished. Resetting state."
+
           - binary_sensor.template.publish:
               id: await_exit
               state: false
@@ -224,6 +218,9 @@ binary_sensor:
           - binary_sensor.template.publish:
               id: await_exit
               state: false
+          - text_sensor.template.publish:
+              id: template_text
+              state: "No exit detected."
 
   - platform: template
     name: "Await Enter"
@@ -238,53 +235,36 @@ binary_sensor:
             condition:
               binary_sensor.is_off: await_exit
         then:
-          - text_sensor.template.publish:
-              id: template_text
-              state: "Detected outer door occupancy. Waiting for possible entry."
           - wait_until:
               condition:
                 and:
-                  - binary_sensor.is_on: inner_door_occupancy
                   - binary_sensor.is_off: outer_door_occupancy
+                  - binary_sensor.is_on: inner_door_occupancy
               timeout: 2s
           - if:
               condition:
                 and:
-                  - binary_sensor.is_on: inner_door_occupancy
                   - binary_sensor.is_off: outer_door_occupancy
+                  - binary_sensor.is_on: inner_door_occupancy
               then:
                 - wait_until:
                     condition:
                       and:
-                        - binary_sensor.is_off: inner_door_occupancy
                         - binary_sensor.is_off: outer_door_occupancy
-                    timeout: 10s
+                        - binary_sensor.is_off: inner_door_occupancy
+                    timeout: 2s
                 - if:
                     condition:
                       and:
-                        - binary_sensor.is_off: inner_door_occupancy
                         - binary_sensor.is_off: outer_door_occupancy
+                        - binary_sensor.is_off: inner_door_occupancy
                     then:
                       - text_sensor.template.publish:
                           id: template_text
-                          state: "Entry detected. Incrementing persons in room."
+                          state: "Enter detected. Increase persons in room."
                       - number.increment: 
                           id: personsInRoom
                           cycle: false
-                    else:
-                      - text_sensor.template.publish:
-                          id: template_text
-                          state: "No entry detected."
-                      - binary_sensor.template.publish:
-                          id: await_enter
-                          state: false
-              else:
-                - text_sensor.template.publish:
-                    id: template_text
-                    state: "No entry detected."
-                - binary_sensor.template.publish:
-                    id: await_enter
-                    state: false
 
           - binary_sensor.template.publish:
               id: await_enter
@@ -293,3 +273,31 @@ binary_sensor:
           - binary_sensor.template.publish:
               id: await_enter
               state: false
+          - text_sensor.template.publish:
+              id: template_text
+              state: "No enter detected."
+
+  - platform: homeassistant
+    name: "Aqara Door Sensor"
+    entity_id: binary_sensor.door_sensor_contact
+    id: aqara_door_sensor
+    on_press:
+      then:
+        - text_sensor.template.publish:
+            id: template_text
+            state: "Door opened. Resetting occupancy."
+        - lambda: |-
+            id(inner_door_occupancy).publish_state(false);
+            id(outer_door_occupancy).publish_state(false);
+            id(await_enter).publish_state(false);
+            id(await_exit).publish_state(false);
+    on_release:
+      then:
+        - text_sensor.template.publish:
+            id: template_text
+            state: "Door closed. Resetting occupancy."
+        - lambda: |-
+            id(inner_door_occupancy).publish_state(false);
+            id(outer_door_occupancy).publish_state(false);
+            id(await_enter).publish_state(false);
+            id(await_exit).publish_state(false);

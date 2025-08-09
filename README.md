@@ -1,6 +1,6 @@
 # ToFDoorEntryTracker
 
-A ESPHome project designed to count people passing through a doorway using two Time-of-Flight (ToF) sensors mounted on a door frame.
+A ESPHome project designed to count people passing through a doorway using two Time-of-Flight (ToF) sensors mounted on top of a door frame.
 
 ## Python virtual enviroment
 
