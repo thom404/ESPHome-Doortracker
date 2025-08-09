@@ -32,7 +32,6 @@ pip3 install esphome -U
 esphome run thomas-room-door-tof.yaml
 ```
 
-
 ### Or alternatively run these commands individually
 
 #### Compile firmware
